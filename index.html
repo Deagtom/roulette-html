@@ -1,0 +1,238 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Рулетка с выбором цвета</title>
+    <style>
+        body {
+            margin: 0;
+            background: #1e1e1e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            color: white;
+            font-family: sans-serif;
+        }
+
+        .roulette-container {
+            position: relative;
+            width: 90%;
+            overflow: hidden;
+            border: 4px solid #444;
+            background: #111;
+        }
+
+        .roulette-strip {
+            display: flex;
+            transition: transform 8s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        .slot {
+            width: 80px;
+            height: 80px;
+            margin: 0;
+            flex-shrink: 0;
+        }
+
+        .red {
+            background: #e74c3c;
+        }
+
+        .black {
+            background: #2c3e50;
+        }
+
+        .green {
+            background: #2ecc71;
+        }
+
+        .indicator {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 4px;
+            background: yellow;
+            transform: translateX(-50%);
+            z-index: 2;
+        }
+
+        button, input {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+            color: white;
+        }
+
+        #colorButtons button {
+            margin: 0 10px;
+            width: 100px;
+            font-weight: bold;
+        }
+
+            #colorButtons button.red {
+                background: #e74c3c;
+            }
+
+            #colorButtons button.black {
+                background: #2c3e50;
+            }
+
+            #colorButtons button.green {
+                background: #2ecc71;
+            }
+
+            #colorButtons button.selected {
+                outline: 3px solid yellow;
+            }
+
+        .result {
+            margin-top: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            min-height: 24px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="roulette-container">
+        <div class="indicator"></div>
+        <div class="roulette-strip" id="strip"></div>
+    </div>
+
+    <div id="colorButtons">
+        <button class="red" onclick="selectColor('red')">Красный</button>
+        <button class="black" onclick="selectColor('black')">Чёрный</button>
+        <button class="green" onclick="selectColor('green')">Зелёный</button>
+    </div>
+
+    <input type="number" id="betInput" placeholder="Введите ставку" min="1" />
+    <button onclick="spin()">Запустить рулетку</button>
+
+    <div class="result" id="result"></div>
+
+    <script>
+    const strip = document.getElementById('strip');
+    const resultText = document.getElementById('result');
+    const betInput = document.getElementById('betInput');
+    const colorButtons = document.querySelectorAll('#colorButtons button');
+
+    let slots = [];
+    let selectedColor = null;
+    let userId = null;
+
+    // Получаем userId из URL
+    function getUserIdFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('userId');
+    }
+
+    function generateSlots(count = 150) {
+      let alternate = true;
+      for (let i = 0; i < count; i++) {
+        const div = document.createElement('div');
+        let color = '';
+        if (i % 30 === 0) {
+          color = 'green';
+        } else {
+          color = alternate ? 'red' : 'black';
+          alternate = !alternate;
+        }
+        div.className = 'slot ' + color;
+        strip.appendChild(div);
+        slots.push(color);
+      }
+    }
+
+    function selectColor(color) {
+      selectedColor = color;
+      colorButtons.forEach(btn => btn.classList.remove('selected'));
+      document.querySelector(`#colorButtons button.${color}`).classList.add('selected');
+      resultText.textContent = '';
+    }
+
+    async function checkBalance(amount) {
+      const response = await fetch(`/api/roulette/balance/${userId}`);
+      if (!response.ok) throw new Error('Ошибка получения баланса');
+      const data = await response.json();
+      return data.balance >= amount;
+    }
+
+    async function placeBet(color, amount) {
+      const response = await fetch('/api/roulette/placebet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ UserId: parseInt(userId), Color: color, Amount: amount })
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Ошибка ставки');
+      }
+      return response.json();
+    }
+
+    async function spin() {
+      if (!userId) {
+        alert('Не передан userId в URL!');
+        return;
+      }
+
+      const bet = parseInt(betInput.value);
+      if (!selectedColor) {
+        alert('Выберите цвет ставки!');
+        return;
+      }
+      if (isNaN(bet) || bet <= 0) {
+        alert('Введите корректную ставку!');
+        return;
+      }
+
+      try {
+        const hasBalance = await checkBalance(bet);
+        if (!hasBalance) {
+          alert('Недостаточно средств на балансе!');
+          return;
+        }
+
+        // Запускаем анимацию рулетки
+        const slotWidth = 80;
+        const visibleSlots = Math.floor(strip.parentElement.offsetWidth / slotWidth);
+        const randomIndex = Math.floor(Math.random() * (slots.length - visibleSlots));
+        const distance = randomIndex * slotWidth;
+
+        strip.style.transition = 'none';
+        strip.style.transform = 'translateX(0)';
+        void strip.offsetWidth; // trigger reflow
+        strip.style.transition = 'transform 8s cubic-bezier(0.25, 1, 0.5, 1)';
+        strip.style.transform = `translateX(-${distance}px)`;
+
+        // Ждём конца анимации
+        await new Promise(resolve => setTimeout(resolve, 8000));
+
+        // Отправляем ставку на сервер и получаем результат
+        const result = await placeBet(selectedColor, bet);
+
+        if (result.win) {
+          resultText.textContent = `Вы выиграли ${result.prize}! Цвет: ${result.actualColor}`;
+          resultText.style.color = 'lime';
+        } else {
+          resultText.textContent = `Вы проиграли ставку ${bet}. Цвет: ${result.actualColor}`;
+          resultText.style.color = 'red';
+        }
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    userId = getUserIdFromUrl();
+    generateSlots();
+    </script>
+
+</body>
+</html>
